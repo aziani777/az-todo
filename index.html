@@ -1252,7 +1252,7 @@ async function runAIBreakdown(id){
     const subtasks=JSON.parse(raw.replace(/```json|```/g,'').trim());
     if(!Array.isArray(subtasks)||!subtasks.length){res.innerHTML='<div style="color:var(--danger);font-size:13px;">Could not parse response.</div>';return;}
     let h=`<div class="ai-result"><div class="ai-result-title">✦ Suggested sub-tasks — select to add:</div>`;
-    subtasks.forEach((s,i)=>`${h+=`<div class="ai-subtask-item"><div class="ai-subtask-check sel" data-i="${i}"></div><span>${esc(s)}</span></div>`;}`);
+    subtasks.forEach((s,i)=>{h+=`<div class="ai-subtask-item"><div class="ai-subtask-check sel" data-i="${i}"></div><span>${esc(s)}</span></div>`;});
     h+=`<button class="btn-ai-apply" id="btnAiApply">Add selected sub-tasks</button></div>`;
     res.innerHTML=h;
     res.querySelectorAll('.ai-subtask-check').forEach(chk=>{
