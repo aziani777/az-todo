@@ -67,16 +67,20 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
 /* CONTENT */
 .content-area{flex:1;padding:16px;width:100%;}
+.content-area.week-view{max-width:100%!important;padding:16px 20px;}
 @media(min-width:900px){
   .content-area{padding:24px 32px;max-width:65%;}
+  .content-area.week-view{padding:20px 24px;}
   .todos-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;align-items:start;}
   .cal-layout{display:grid;grid-template-columns:420px 1fr;gap:28px;align-items:start;}
-  .week-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;}
+  .week-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;}
 }
 @media(min-width:1280px){
   .todos-grid{grid-template-columns:repeat(4,1fr);}
   .cal-layout{grid-template-columns:480px 1fr;}
   .content-area{padding:28px 48px;max-width:62%;}
+  .content-area.week-view{padding:20px 28px;}
+  .week-grid{gap:10px;}
 }
 @media(min-width:1600px){.content-area{padding:32px 60px;max-width:60%;}}
 
@@ -421,10 +425,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <nav class="nav">
     <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
     <button class="nav-tab" data-tab="all">All</button>
-    <button class="nav-tab" data-tab="perso">Perso</button>
-    <button class="nav-tab" data-tab="pro">Pro</button>
-    <button class="nav-tab" data-tab="brainlabs">Brainlabs</button>
-    <button class="nav-tab" data-tab="easyparts">EasyParts</button>
+    <!-- workspace tabs injected here by rebuildNav() -->
     <button class="nav-tab" data-tab="week">Week</button>
     <button class="nav-tab" data-tab="calendar">Calendar</button>
   </nav>
@@ -482,10 +483,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="form-group">
       <label class="form-label">Section</label>
       <select class="form-input" id="editSection">
-        <option value="perso">Perso</option>
-        <option value="pro">Pro</option>
-        <option value="brainlabs">Brainlabs</option>
-        <option value="easyparts">EasyParts</option>
+        <!-- options populated dynamically by openEditModal -->
       </select>
     </div>
     <div id="aiResult"></div>
@@ -526,13 +524,46 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 </div>
 
 <script>
-/* ══ CONSTANTS ══ */
-const SECS={
-  perso:    {label:'Perso',    tag:'tag-perso',    dot:'dot-perso',    bar:'accent-bar-perso',    color:'var(--purple)'},
-  pro:      {label:'Pro',      tag:'tag-pro',       dot:'dot-pro',      bar:'accent-bar-pro',       color:'var(--accent)'},
-  brainlabs:{label:'Brainlabs',tag:'tag-brainlabs', dot:'dot-brainlabs',bar:'accent-bar-brainlabs', color:'var(--success)'},
-  easyparts:{label:'EasyParts',tag:'tag-easyparts', dot:'dot-easyparts',bar:'accent-bar-easyparts', color:'var(--warning)'},
-};
+/* ══ WORKSPACE COLORS ══ */
+const WS_COLORS=[
+  {id:'purple', css:'var(--purple)',  soft:'var(--purple-soft)',  dot:'dot-perso'},
+  {id:'blue',   css:'var(--accent)',  soft:'var(--accent-soft)',  dot:'dot-pro'},
+  {id:'green',  css:'var(--success)', soft:'var(--success-soft)', dot:'dot-brainlabs'},
+  {id:'amber',  css:'var(--warning)', soft:'var(--warning-soft)', dot:'dot-easyparts'},
+  {id:'red',    css:'var(--danger)',  soft:'var(--danger-soft)',  dot:'dot-ws-red'},
+  {id:'pink',   css:'#ec4899',        soft:'#fdf2f8',             dot:'dot-ws-pink'},
+  {id:'teal',   css:'#0d9488',        soft:'#f0fdfa',             dot:'dot-ws-teal'},
+  {id:'indigo', css:'#6366f1',        soft:'#eef2ff',             dot:'dot-ws-indigo'},
+];
+
+const DEFAULT_WS=[
+  {id:'perso',     label:'Perso',     color:'purple'},
+  {id:'pro',       label:'Pro',       color:'blue'},
+  {id:'brainlabs', label:'Brainlabs', color:'green'},
+  {id:'easyparts', label:'EasyParts', color:'amber'},
+];
+
+function getWsColor(colorId){return WS_COLORS.find(c=>c.id===colorId)||WS_COLORS[0];}
+
+function wsInfo(ws){
+  const c=getWsColor(ws.color);
+  return {
+    label: ws.label,
+    tag:   `tag-ws-${ws.id}`,
+    dot:   c.dot,
+    bar:   `accent-bar-ws-${ws.id}`,
+    color: c.css,
+    soft:  c.soft,
+  };
+}
+
+/* Build SECS-compatible object dynamically */
+function getSECS(){
+  const out={};
+  (S.workspaces||DEFAULT_WS).forEach(ws=>{out[ws.id]=wsInfo(ws);});
+  return out;
+}
+let SECS={}; // populated after load
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const SMON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -556,30 +587,92 @@ let S={
   todos:[], meetings:[],
   inlineOpen:null, inlineState:{}, dashOpen:{},
   weekOffset:0,
+  workspaces: JSON.parse(JSON.stringify(DEFAULT_WS)),
 };
 
 function load(){
   try{
     const d=JSON.parse(localStorage.getItem('aztodo_v5')||'{}');
-    ['theme','todos','meetings','filter'].forEach(k=>{if(d[k]!==undefined)S[k]=d[k];});
-    // migrate old data: ensure subtasks & new fields exist
+    ['theme','todos','meetings','filter','workspaces'].forEach(k=>{if(d[k]!==undefined)S[k]=d[k];});
+    if(!S.workspaces||!S.workspaces.length) S.workspaces=JSON.parse(JSON.stringify(DEFAULT_WS));
     S.todos.forEach(t=>{
       if(!t.subtasks)t.subtasks=[];
       if(!t.label)t.label='';
       if(!t.recur)t.recur='';
       if(!t.note)t.note='';
       if(!t.link)t.link='';
+      // migrate section ids: if section no longer exists, keep as-is
     });
   }catch(e){}
 }
 
 let _pushTimer=null;
 function save(){
-  localStorage.setItem('aztodo_v5',JSON.stringify({theme:S.theme,todos:S.todos,meetings:S.meetings,filter:S.filter}));
+  localStorage.setItem('aztodo_v5',JSON.stringify({theme:S.theme,todos:S.todos,meetings:S.meetings,filter:S.filter,workspaces:S.workspaces}));
   clearTimeout(_pushTimer);
   _pushTimer=setTimeout(()=>cloudPush(),1500);
 }
 load();
+SECS=getSECS(); // build after load so custom workspaces are included
+
+/* ══ DYNAMIC WORKSPACE CSS ══ */
+function injectWsCSS(){
+  let old=document.getElementById('ws-styles');if(old)old.remove();
+  const style=document.createElement('style');style.id='ws-styles';
+  let css='';
+  (S.workspaces||[]).forEach(ws=>{
+    const c=getWsColor(ws.color);
+    css+=`.tag-ws-${ws.id}{background:${c.soft};color:${c.css};}`;
+    css+=`.accent-bar-ws-${ws.id}{border-top:3px solid ${c.css};}`;
+    css+=`.dot-ws-${ws.id}{background:${c.css};}`;
+    // priority-like bg tints for todo items in this workspace — lighter approach
+  });
+  // extra dot classes
+  css+=`.dot-ws-red{background:var(--danger);}`;
+  css+=`.dot-ws-pink{background:#ec4899;}`;
+  css+=`.dot-ws-teal{background:#0d9488;}`;
+  css+=`.dot-ws-indigo{background:#6366f1;}`;
+  style.textContent=css;
+  document.head.appendChild(style);
+}
+injectWsCSS();
+
+/* ══ DYNAMIC NAV ══ */
+function rebuildNav(){
+  SECS=getSECS();
+  injectWsCSS();
+  const nav=document.querySelector('.nav');
+  // keep fixed tabs, remove workspace tabs, re-add them
+  nav.querySelectorAll('.nav-tab[data-ws]').forEach(t=>t.remove());
+  const calTab=nav.querySelector('[data-tab="calendar"]');
+  const weekTab=nav.querySelector('[data-tab="week"]');
+  (S.workspaces||[]).forEach(ws=>{
+    const btn=document.createElement('button');
+    btn.className='nav-tab'+(S.tab===ws.id?' active':'');
+    btn.dataset.tab=ws.id; btn.dataset.ws='1';
+    btn.textContent=ws.label;
+    btn.addEventListener('click',()=>{
+      S.tab=ws.id;S.inlineOpen=null;S.quickMeeting=null;
+      nav.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
+      btn.classList.add('active');render();
+    });
+    nav.insertBefore(btn,weekTab||calTab||null);
+  });
+  // manage settings tab
+  let settingsTab=nav.querySelector('[data-tab="workspaces"]');
+  if(!settingsTab){
+    settingsTab=document.createElement('button');
+    settingsTab.className='nav-tab';
+    settingsTab.dataset.tab='workspaces';
+    settingsTab.textContent='⚙ Spaces';
+    settingsTab.addEventListener('click',()=>{
+      S.tab='workspaces';S.inlineOpen=null;
+      nav.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
+      settingsTab.classList.add('active');render();
+    });
+    nav.appendChild(settingsTab);
+  }
+}
 
 /* ══ THEME ══ */
 function applyTheme(){
@@ -596,13 +689,22 @@ document.getElementById('themeBtn').addEventListener('click',()=>{
 });
 
 /* ══ TABS ══ */
-document.querySelectorAll('.nav-tab').forEach(t=>{
-  t.addEventListener('click',()=>{
-    S.tab=t.dataset.tab; S.inlineOpen=null; S.quickMeeting=null;
-    document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
-    t.classList.add('active'); render();
+function initTabs(){
+  document.querySelectorAll('.nav-tab:not([data-ws])').forEach(t=>{
+    t.addEventListener('click',()=>{
+      S.tab=t.dataset.tab; S.inlineOpen=null; S.quickMeeting=null;
+      document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active'); render();
+    });
   });
-});
+  rebuildNav();
+  // restore active tab highlight
+  document.querySelectorAll('.nav-tab').forEach(t=>{
+    if(t.dataset.tab===S.tab) t.classList.add('active');
+    else t.classList.remove('active');
+  });
+}
+initTabs();
 
 /* ══ UTILS ══ */
 function uid(){return Math.random().toString(36).slice(2,9)+Date.now().toString(36);}
@@ -753,15 +855,146 @@ setTimeout(showDigest,800);
 function render(){
   closeCtx(); closeMiniCal();
   const ca=document.getElementById('contentArea');
+  ca.classList.remove('week-view'); // reset each render
   if(S.tab==='calendar') renderCalendar(ca);
   else if(S.tab==='dashboard') renderDashboard(ca);
   else if(S.tab==='week') renderWeek(ca);
-  else renderTodos(ca);
+  else if(S.tab==='workspaces') renderWorkspaces(ca);
+  else if(S.tab==='all') renderTodos(ca);
+  else {
+    const ws=(S.workspaces||[]).find(w=>w.id===S.tab);
+    if(ws) renderTodos(ca);
+    else renderDashboard(ca);
+  }
 }
 
 /* ══════════════════════════════════════
-   DASHBOARD
+   WORKSPACE MANAGEMENT
 ══════════════════════════════════════ */
+function renderWorkspaces(ca){
+  const wsList=S.workspaces||[];
+  let h=`<div style="max-width:520px;">
+    <div style="font-size:18px;font-weight:700;margin-bottom:4px;">Workspaces</div>
+    <div style="font-size:13px;color:var(--text3);margin-bottom:20px;">Create, rename, reorder or delete your workspaces.</div>
+
+    <div id="wsListEl" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">`;
+
+  wsList.forEach((ws,i)=>{
+    const c=getWsColor(ws.color);
+    const taskCount=S.todos.filter(t=>t.section===ws.id).length;
+    h+=`<div class="ws-row" data-wsi="${i}" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 16px;display:flex;align-items:center;gap:12px;box-shadow:var(--shadow);">
+      <div style="width:16px;height:16px;border-radius:50%;background:${c.css};flex-shrink:0;"></div>
+      <div style="flex:1;font-size:15px;font-weight:600;">${esc(ws.label)}</div>
+      <div style="font-size:12px;color:var(--text3);">${taskCount} task${taskCount!==1?'s':''}</div>
+      <button class="btn-ws-edit btn-icon" data-wsi="${i}" title="Edit">✎</button>
+      ${wsList.length>1?`<button class="btn-ws-del btn-icon" data-wsi="${i}" title="Delete" style="color:var(--danger);">✕</button>`:''}
+    </div>`;
+  });
+
+  h+=`</div>
+
+    <div style="background:var(--surface);border:2px dashed var(--border2);border-radius:var(--radius-lg);padding:20px;" id="wsNewForm">
+      <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:var(--text2);">New workspace</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <input id="wsNewName" class="form-input" placeholder="Workspace name (e.g. NORDPURE)" style="font-size:15px;" />
+        <div style="font-size:13px;font-weight:600;color:var(--text2);margin-bottom:4px;">Color</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;" id="wsColorPicker">
+          ${WS_COLORS.map(c=>`<div class="ws-color-opt" data-cid="${c.id}" title="${c.id}" style="width:28px;height:28px;border-radius:50%;background:${c.css};cursor:pointer;border:3px solid transparent;transition:transform .15s;"></div>`).join('')}
+        </div>
+        <button id="wsAddBtn" style="background:var(--accent);color:white;border:none;border-radius:9px;padding:11px;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px;">Add workspace</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit workspace inline panel -->
+  <div id="wsEditPanel" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:none;align-items:center;justify-content:center;padding:16px;">
+    <div style="background:var(--surface);border-radius:var(--radius-xl);padding:24px;width:100%;max-width:400px;box-shadow:var(--shadow-lg);">
+      <div style="font-size:17px;font-weight:700;margin-bottom:16px;">Edit workspace</div>
+      <input id="wsEditName" class="form-input" style="margin-bottom:12px;" />
+      <div style="font-size:13px;font-weight:600;color:var(--text2);margin-bottom:8px;">Color</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;" id="wsEditColorPicker">
+        ${WS_COLORS.map(c=>`<div class="ws-edit-color-opt" data-cid="${c.id}" style="width:28px;height:28px;border-radius:50%;background:${c.css};cursor:pointer;border:3px solid transparent;transition:transform .15s;"></div>`).join('')}
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button id="wsEditCancel" style="flex:1;padding:10px;border-radius:9px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);font-family:inherit;font-size:15px;cursor:pointer;">Cancel</button>
+        <button id="wsEditSave" style="flex:2;padding:10px;border-radius:9px;border:none;background:var(--accent);color:white;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;">Save</button>
+      </div>
+    </div>
+  </div>`;
+
+  ca.innerHTML=h;
+
+  // color picker for new ws
+  let selectedColor=WS_COLORS[4].id; // default red for new
+  function updateColorPicker(container,sel){
+    container.querySelectorAll('[data-cid]').forEach(o=>{
+      o.style.border=o.dataset.cid===sel?'3px solid var(--text)':'3px solid transparent';
+      o.style.transform=o.dataset.cid===sel?'scale(1.2)':'scale(1)';
+    });
+  }
+  updateColorPicker(document.getElementById('wsColorPicker'),selectedColor);
+  document.getElementById('wsColorPicker').querySelectorAll('.ws-color-opt').forEach(o=>{
+    o.addEventListener('click',()=>{selectedColor=o.dataset.cid;updateColorPicker(document.getElementById('wsColorPicker'),selectedColor);});
+  });
+
+  // add new workspace
+  document.getElementById('wsAddBtn').addEventListener('click',()=>{
+    const name=document.getElementById('wsNewName').value.trim();
+    if(!name){document.getElementById('wsNewName').focus();return;}
+    const id='ws_'+uid();
+    S.workspaces.push({id,label:name,color:selectedColor});
+    save(); rebuildNav(); render();
+    toast(`✓ Workspace "${name}" created`);
+  });
+  document.getElementById('wsNewName').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('wsAddBtn').click();});
+
+  // edit buttons
+  let editingWsIdx=null;
+  let editSelectedColor=null;
+  ca.querySelectorAll('.btn-ws-edit').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      editingWsIdx=parseInt(btn.dataset.wsi);
+      const ws=wsList[editingWsIdx];
+      document.getElementById('wsEditName').value=ws.label;
+      editSelectedColor=ws.color;
+      const panel=document.getElementById('wsEditPanel');
+      panel.style.display='flex';
+      updateColorPicker(document.getElementById('wsEditColorPicker'),editSelectedColor);
+      document.getElementById('wsEditName').focus();
+    });
+  });
+  document.getElementById('wsEditColorPicker').querySelectorAll('.ws-edit-color-opt').forEach(o=>{
+    o.addEventListener('click',()=>{editSelectedColor=o.dataset.cid;updateColorPicker(document.getElementById('wsEditColorPicker'),editSelectedColor);});
+  });
+  document.getElementById('wsEditCancel').addEventListener('click',()=>{document.getElementById('wsEditPanel').style.display='none';});
+  document.getElementById('wsEditSave').addEventListener('click',()=>{
+    if(editingWsIdx===null)return;
+    const name=document.getElementById('wsEditName').value.trim();
+    if(!name)return;
+    S.workspaces[editingWsIdx].label=name;
+    S.workspaces[editingWsIdx].color=editSelectedColor;
+    save(); rebuildNav();
+    document.getElementById('wsEditPanel').style.display='none';
+    render(); toast('✓ Workspace updated');
+  });
+
+  // delete buttons
+  ca.querySelectorAll('.btn-ws-del').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const idx=parseInt(btn.dataset.wsi);
+      const ws=wsList[idx];
+      const taskCount=S.todos.filter(t=>t.section===ws.id).length;
+      const msg=taskCount>0?`Delete "${ws.label}"? It has ${taskCount} task${taskCount!==1?'s':''} which will also be deleted.`:`Delete workspace "${ws.label}"?`;
+      if(!confirm(msg))return;
+      if(taskCount>0) S.todos=S.todos.filter(t=>t.section!==ws.id);
+      S.workspaces.splice(idx,1);
+      if(S.tab===ws.id) S.tab='dashboard';
+      save(); rebuildNav(); render(); toast(`Workspace deleted`);
+    });
+  });
+}
+
+
 function accSection(id,icon,label,colorCss,count,rows,openByDefault){
   const isOpen=S.dashOpen[id]!==undefined?S.dashOpen[id]:openByDefault;
   let h=`<div class="acc-wrap" data-acc="${id}">
@@ -777,7 +1010,7 @@ function accSection(id,icon,label,colorCss,count,rows,openByDefault){
   return h;
 }
 function dashTodoRow(t){
-  const info=SECS[t.section];
+  const info=SECS[t.section]||{tag:'tag-pro',label:t.section||'?',color:'var(--accent)'};
   const ov=isOv(t.due,t.done);
   const lc=getLabelColor(t.label);
   return `<div class="dash-todo-row" data-id="${t.id}">
@@ -791,6 +1024,7 @@ function dashTodoRow(t){
   </div>`;
 }
 function renderDashboard(ca){
+  SECS=getSECS();
   const today=todayStr(),tomorrow=tomorrowStr();
   const active=S.todos.filter(t=>!t.done);
   const dueToday=active.filter(t=>t.due===today);
@@ -855,8 +1089,9 @@ function bindDashRows(ca){
 function cap(s){return s?s[0].toUpperCase()+s.slice(1):'';}
 
 function renderTodos(ca){
+  SECS=getSECS();
   const isSingle=S.tab!=='all';
-  const secs=isSingle?[S.tab]:['perso','pro','brainlabs','easyparts'];
+  const secs=isSingle?[S.tab]:(S.workspaces||[]).map(w=>w.id);
   let h=`<div class="filter-bar">
     <button class="filter-btn ${S.filter==='active'?'active':''}" data-f="active">Active</button>
     <button class="filter-btn ${S.filter==='all'?'active':''}" data-f="all">All</button>
@@ -869,7 +1104,8 @@ function renderTodos(ca){
 }
 
 function buildSection(sec){
-  const info=SECS[sec];
+  const info=SECS[sec]||{label:sec,tag:'tag-pro',bar:'accent-bar-pro',color:'var(--accent)',soft:'var(--accent-soft)'};
+  if(!info) return '';
   let todos=S.todos.filter(t=>t.section===sec);
   if(S.filter==='active') todos=todos.filter(t=>!t.done);
   if(S.filter==='done')   todos=todos.filter(t=>t.done);
@@ -1049,8 +1285,9 @@ function toggleDone(id){const t=S.todos.find(x=>x.id===id);if(t){t.done=!t.done;
    WEEKLY VIEW
 ══════════════════════════════════════ */
 function renderWeek(ca){
+  ca.classList.add('week-view');
   const today=new Date();
-  const dow=(today.getDay()+6)%7; // 0=Mon
+  const dow=(today.getDay()+6)%7;
   const weekStart=new Date(today);
   weekStart.setDate(today.getDate()-dow+S.weekOffset*7);
 
@@ -1065,10 +1302,12 @@ function renderWeek(ca){
     <div class="week-title">${ws} — ${we}</div>
     <div style="display:flex;gap:6px;">
       <button class="btn-icon" id="weekPrev">‹</button>
-      <button class="btn-icon" id="weekToday">Today</button>
+      <button class="btn-icon" id="weekToday" style="padding:0 10px;width:auto;font-size:12px;">Today</button>
       <button class="btn-icon" id="weekNext">›</button>
     </div>
-  </div><div class="week-grid">`;
+  </div>
+  <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
+  <div class="week-grid" style="min-width:700px;">`;
 
   days.forEach((ds,i)=>{
     const isToday=ds===todayStr();
@@ -1084,21 +1323,21 @@ function renderWeek(ca){
       h+=`<div class="week-empty">—</div>`;
     }
     dayMtgs.forEach(m=>{
-      const info=SECS[m.section];
-      h+=`<div class="week-mtg"><div class="week-mtg-time">${m.time||'--:--'}</div><div style="flex:1;font-size:13px">${esc(m.title)}</div><span class="cal-dot ${info.dot}"></span></div>`;
+      const info=SECS[m.section]||{dot:'',color:'var(--text3)'};
+      h+=`<div class="week-mtg"><div class="week-mtg-time">${m.time||'--:--'}</div><div style="flex:1;font-size:12px;line-height:1.3;">${esc(m.title)}</div></div>`;
     });
     dayTodos.forEach(t=>{
-      const info=SECS[t.section];
+      const info=SECS[t.section]||{color:'var(--text3)'};
       const lc=getLabelColor(t.label);
       h+=`<div class="week-item${t.done?' done-item':''}" data-id="${t.id}">
-        ${lc?`<span class="clabel" style="background:${lc}"></span>`:`<span class="week-item-dot" style="background:${info.color}"></span>`}
-        <span style="flex:1">${esc(t.text)}</span>
-        <span class="pri-badge pri-badge-${t.priority||'medium'}" style="font-size:10px">${cap(t.priority||'medium')[0]}</span>
+        <span class="week-item-dot" style="background:${lc||info.color}"></span>
+        <span style="flex:1;font-size:12px;line-height:1.35;">${esc(t.text)}</span>
+        <span class="pri-badge pri-badge-${t.priority||'medium'}" style="font-size:9px;padding:1px 4px;">${cap(t.priority||'medium')[0]}</span>
       </div>`;
     });
     h+=`</div>`;
   });
-  h+=`</div>`;
+  h+=`</div></div>`;
   ca.innerHTML=h;
   document.getElementById('weekPrev').addEventListener('click',()=>{S.weekOffset--;render();});
   document.getElementById('weekNext').addEventListener('click',()=>{S.weekOffset++;render();});
@@ -1166,8 +1405,10 @@ function openEditModal(id,mode){
   document.getElementById('editNote').value=t.note||'';
   document.getElementById('editLink').value=t.link||'';
   document.getElementById('editDue').value=t.due||'';
-  document.getElementById('editSection').value=t.section;
   document.getElementById('editRecur').value=t.recur||'';
+  // populate section dropdown dynamically
+  const secSel=document.getElementById('editSection');
+  secSel.innerHTML=(S.workspaces||[]).map(ws=>`<option value="${ws.id}"${ws.id===t.section?' selected':''}>${esc(ws.label)}</option>`).join('');
   // priority
   document.querySelectorAll('#editPriRow .pri-box').forEach(b=>b.classList.toggle('sel',b.dataset.p===(t.priority||'medium')));
   // label picker
@@ -1390,7 +1631,7 @@ function renderCalendar(ca){
           <span class="time-colon">:</span>
           <select id="qmMin" class="qm-input time-sel"><option value="">MM</option>${['00','15','30','45'].map(m=>`<option value="${m}">${m}</option>`).join('')}</select>
         </div>
-        <select id="qmSec" class="qm-input">${Object.entries(SECS).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}</select>
+        <select id="qmSec" class="qm-input">${(S.workspaces||DEFAULT_WS).map(ws=>`<option value="${ws.id}">${esc(ws.label)}</option>`).join('')}</select>
       </div>
       <div class="qm-row"><input id="qmNotes" class="qm-input" placeholder="Notes (optional)" /></div>
       <div class="qm-actions"><button class="btn-cancel-qm" id="qmCancel">Cancel</button><button class="btn-save-mtg" id="qmSave">Save meeting</button></div>
