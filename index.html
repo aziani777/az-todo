@@ -451,8 +451,28 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
 
+/* INTEGRATIONS PANEL */
+.integrations-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;margin-bottom:20px;box-shadow:var(--shadow);}
+.integrations-title{font-size:13px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.integration-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);}
+.integration-row:last-child{border-bottom:none;padding-bottom:0;}
+.integration-icon{font-size:22px;flex-shrink:0;}
+.integration-info{flex:1;min-width:0;}
+.integration-name{font-size:14px;font-weight:600;color:var(--text);}
+.integration-desc{font-size:12px;color:var(--text3);margin-top:1px;}
+.integration-status{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;flex-shrink:0;}
+.integration-status.ok{background:var(--success-soft);color:var(--success);}
+.integration-status.idle{background:var(--surface2);color:var(--text3);}
+.integration-status.loading{background:var(--warning-soft);color:var(--warning);}
+.integration-status.err{background:var(--danger-soft);color:var(--danger);}
+.btn-sync-integration{padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;flex-shrink:0;}
+.btn-sync-integration:hover{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
+.btn-sync-integration:disabled{opacity:.5;cursor:not-allowed;}
+.integration-log{margin-top:6px;font-size:12px;color:var(--text3);line-height:1.5;max-height:80px;overflow-y:auto;background:var(--surface2);border-radius:6px;padding:6px 10px;display:none;}
+.integration-log.show{display:block;}
+
 @media print{
-  .header,.nav,.filter-bar,.inline-add,.btn-sync,.btn-icon,.ctx-menu{display:none!important;}
+  .header,.nav,.filter-bar,.inline-add,.btn-sync,.btn-icon,.ctx-menu,.integrations-panel{display:none!important;}
   .content-area{padding:0;max-width:100%!important;}
   .section-block{break-inside:avoid;box-shadow:none;border:1px solid #ccc;}
 }
@@ -736,8 +756,9 @@ function rebuildNav(){
   SECS=getSECS();
   injectWsCSS();
   const nav=document.querySelector('.nav');
-  // keep fixed tabs, remove workspace tabs, re-add them
   nav.querySelectorAll('.nav-tab[data-ws]').forEach(t=>t.remove());
+  // also remove any stale spaces tab
+  nav.querySelectorAll('[data-tab="workspaces"]').forEach(t=>t.remove());
   const calTab=nav.querySelector('[data-tab="calendar"]');
   const weekTab=nav.querySelector('[data-tab="week"]');
   (S.workspaces||[]).forEach(ws=>{
@@ -752,33 +773,16 @@ function rebuildNav(){
     });
     nav.insertBefore(btn,weekTab||calTab||null);
   });
-  // manage settings tab
-  let settingsTab=nav.querySelector('[data-tab="workspaces"]');
-  if(!settingsTab){
-    settingsTab=document.createElement('button');
-    settingsTab.className='nav-tab';
-    settingsTab.dataset.tab='workspaces';
-    settingsTab.textContent='⚙ Spaces';
-    settingsTab.addEventListener('click',()=>{
-      S.tab='workspaces';S.inlineOpen=null;
-      nav.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
-      settingsTab.classList.add('active');render();
-    });
-    nav.appendChild(settingsTab);
-  }
 }
 
 /* ══ THEME ══ */
 function applyTheme(){
-  let t=S.theme;
-  if(t==='auto') t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
-  document.documentElement.setAttribute('data-theme',t);
-  const lbl=S.theme==='auto'?'🌗 Auto':t==='dark'?'☀️ Light':'🌙 Dark';
+  if(S.theme!=='dark') S.theme='light';
+  document.documentElement.setAttribute('data-theme',S.theme);
   const ti=document.getElementById('toolTheme');
-  if(ti) ti.textContent=lbl;
+  if(ti) ti.textContent=S.theme==='dark'?'☀️ Light mode':'🌙 Dark mode';
 }
 applyTheme();
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',applyTheme);
 
 /* ══ TOOLS DROPDOWN ══ */
 document.getElementById('toolsBtn').addEventListener('click',e=>{
@@ -788,7 +792,7 @@ document.getElementById('toolsBtn').addEventListener('click',e=>{
 document.addEventListener('click',()=>document.getElementById('toolsMenu')?.classList.remove('open'));
 
 document.getElementById('toolTheme').addEventListener('click',()=>{
-  S.theme=S.theme==='light'?'dark':S.theme==='dark'?'auto':'light';
+  S.theme=S.theme==='light'?'dark':'light';
   applyTheme(); save();
   document.getElementById('toolsMenu').classList.remove('open');
 });
@@ -799,7 +803,6 @@ document.getElementById('toolPdf').addEventListener('click',()=>{
 document.getElementById('toolSpaces').addEventListener('click',()=>{
   S.tab='workspaces';
   document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
-  document.querySelector('[data-tab="workspaces"]')?.classList.add('active');
   document.getElementById('toolsMenu').classList.remove('open');
   render();
 });
@@ -807,9 +810,6 @@ document.getElementById('toolPomodoro').addEventListener('click',()=>{
   document.getElementById('toolsMenu').classList.remove('open');
   openPomodoro();
 });
-
-/* ══ PDF EXPORT ══ */
-// (handled via toolPdf above)
 
 /* ══ TABS ══ */
 function initTabs(){
@@ -1224,6 +1224,237 @@ function dashTodoRow(t){
     </div>
   </div>`;
 }
+/* ══════════════════════════════════════
+   INTEGRATIONS — Gmail + Google Calendar
+══════════════════════════════════════ */
+const INTEGRATION_STATE={
+  gmail:{status:'idle',lastSync:null,log:[]},
+  gcal:{status:'idle',lastSync:null,log:[]},
+};
+const GCAL_EMAIL='adzian.mcc@gmail.com';
+
+function integrationLog(key,msg){
+  const ts=new Date().toLocaleTimeString();
+  INTEGRATION_STATE[key].log.unshift(`[${ts}] ${msg}`);
+  if(INTEGRATION_STATE[key].log.length>20) INTEGRATION_STATE[key].log.pop();
+}
+
+function updateIntegrationUI(key){
+  const st=INTEGRATION_STATE[key];
+  const statusEl=document.getElementById(`int-status-${key}`);
+  const logEl=document.getElementById(`int-log-${key}`);
+  const btnEl=document.getElementById(`int-btn-${key}`);
+  if(!statusEl)return;
+  const labels={idle:'Ready',loading:'Syncing…',ok:'Synced',err:'Error'};
+  statusEl.className=`integration-status ${st.status}`;
+  statusEl.textContent=labels[st.status]||st.status;
+  if(logEl){logEl.innerHTML=st.log.map(l=>`<div>${esc(l)}</div>`).join('');logEl.classList.toggle('show',st.log.length>0);}
+  if(btnEl) btnEl.disabled=st.status==='loading';
+}
+
+/* ── GMAIL SYNC ── */
+async function syncGmail(){
+  INTEGRATION_STATE.gmail.status='loading';
+  updateIntegrationUI('gmail');
+  integrationLog('gmail','Asking Claude to check Gmail for actionable emails…');
+  updateIntegrationUI('gmail');
+
+  try{
+    const workspaceList=(S.workspaces||[]).map(w=>w.label).join(', ');
+    const existingTasks=S.todos.filter(t=>t.source==='gmail').map(t=>t.text);
+
+    const response=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:2000,
+        mcp_servers:[{type:'url',url:'https://gmail.mcp.claude.com/mcp',name:'gmail'}],
+        messages:[{role:'user',content:`Search Gmail for emails received in the last 48 hours that require action or a reply. For each actionable email, create a task.
+
+Available workspaces: ${workspaceList}
+Already imported tasks (skip these): ${existingTasks.slice(0,20).join(' | ')||'none'}
+
+Reply ONLY with a JSON array. Each object must have:
+- "text": short task description (max 60 chars), starting with action verb
+- "section": best matching workspace id from: ${(S.workspaces||[]).map(w=>'"'+w.id+'"').join(', ')}
+- "priority": "high" | "medium" | "low"
+- "due": date string YYYY-MM-DD or null
+- "note": email subject or sender info (max 80 chars)
+- "emailId": message id if available
+
+Return [] if no actionable emails found. Return ONLY valid JSON, no markdown.`}]
+      })
+    });
+
+    const data=await response.json();
+    const raw=data.content?.find(c=>c.type==='text')?.text||'[]';
+    const tasks=JSON.parse(raw.replace(/```json|```/g,'').trim());
+
+    if(!Array.isArray(tasks)||tasks.length===0){
+      integrationLog('gmail','No new actionable emails found.');
+      INTEGRATION_STATE.gmail.status='ok';
+      INTEGRATION_STATE.gmail.lastSync=new Date();
+      updateIntegrationUI('gmail');
+      render();return;
+    }
+
+    let added=0;
+    tasks.forEach(task=>{
+      if(!task.text) return;
+      // dedup
+      if(S.todos.find(t=>t.text===task.text)) return;
+      S.todos.push({
+        id:uid(), text:task.text,
+        section:task.section||(S.workspaces[0]?.id||'perso'),
+        priority:task.priority||'medium',
+        due:task.due||null,
+        note:task.note||'',
+        link:'', label:'', recur:'', subtasks:[],
+        source:'gmail',
+        done:false, created:new Date().toISOString()
+      });
+      added++;
+    });
+
+    save();
+    integrationLog('gmail',`✓ Added ${added} task${added!==1?'s':''} from Gmail.`);
+    INTEGRATION_STATE.gmail.status='ok';
+    INTEGRATION_STATE.gmail.lastSync=new Date();
+    updateIntegrationUI('gmail');
+    if(added>0){toast(`📧 ${added} task${added!==1?'s':''} imported from Gmail`);render();}
+
+  }catch(err){
+    integrationLog('gmail',`Error: ${err.message}`);
+    INTEGRATION_STATE.gmail.status='err';
+    updateIntegrationUI('gmail');
+  }
+}
+
+/* ── GOOGLE CALENDAR SYNC ── */
+async function syncGCal(){
+  INTEGRATION_STATE.gcal.status='loading';
+  updateIntegrationUI('gcal');
+  integrationLog('gcal',`Fetching calendar events for ${GCAL_EMAIL}…`);
+  updateIntegrationUI('gcal');
+
+  try{
+    const today=todayStr();
+    const in30=addDays(today,30);
+    const workspaceList=(S.workspaces||[]).map(w=>w.label+':'+w.id).join(', ');
+
+    const response=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:3000,
+        mcp_servers:[{type:'url',url:'https://gcal.mcp.claude.com/mcp',name:'gcal'}],
+        messages:[{role:'user',content:`List all calendar events for the email ${GCAL_EMAIL} from ${today} to ${in30}. 
+
+Available workspaces: ${workspaceList}
+
+Reply ONLY with a JSON array. Each object must have:
+- "title": event title
+- "date": YYYY-MM-DD
+- "time": HH:MM (24h) or "" if all-day
+- "section": best matching workspace id from workspaces above, default to first workspace if unsure
+- "notes": location or description (max 80 chars) or ""
+- "gcalId": event id
+
+Return [] if no events. Return ONLY valid JSON, no markdown.`}]
+      })
+    });
+
+    const data=await response.json();
+    const raw=data.content?.find(c=>c.type==='text')?.text||'[]';
+    const events=JSON.parse(raw.replace(/```json|```/g,'').trim());
+
+    if(!Array.isArray(events)||events.length===0){
+      integrationLog('gcal','No upcoming events found.');
+      INTEGRATION_STATE.gcal.status='ok';
+      INTEGRATION_STATE.gcal.lastSync=new Date();
+      updateIntegrationUI('gcal');
+      render();return;
+    }
+
+    let added=0,updated=0;
+    events.forEach(ev=>{
+      if(!ev.title||!ev.date) return;
+      const existing=S.meetings.find(m=>m.gcalId&&m.gcalId===ev.gcalId);
+      if(existing){
+        // update
+        existing.title=ev.title;existing.date=ev.date;existing.time=ev.time||'';
+        existing.notes=ev.notes||'';existing.section=ev.section||existing.section;
+        updated++;
+      } else {
+        // check duplicate by title+date
+        if(S.meetings.find(m=>m.title===ev.title&&m.date===ev.date)) return;
+        S.meetings.push({
+          id:uid(),title:ev.title,date:ev.date,
+          time:ev.time||'',section:ev.section||(S.workspaces[0]?.id||'perso'),
+          notes:ev.notes||'',gcalId:ev.gcalId||''
+        });
+        added++;
+      }
+    });
+
+    save();
+    integrationLog('gcal',`✓ ${added} added, ${updated} updated from Google Calendar.`);
+    INTEGRATION_STATE.gcal.status='ok';
+    INTEGRATION_STATE.gcal.lastSync=new Date();
+    updateIntegrationUI('gcal');
+    if(added+updated>0){toast(`📅 ${added} events synced from Google Calendar`);render();}
+
+  }catch(err){
+    integrationLog('gcal',`Error: ${err.message}`);
+    INTEGRATION_STATE.gcal.status='err';
+    updateIntegrationUI('gcal');
+  }
+}
+
+function buildIntegrationsPanel(){
+  const gmSt=INTEGRATION_STATE.gmail;
+  const gcSt=INTEGRATION_STATE.gcal;
+  const fmtSync=st=>st.lastSync?`Last sync: ${st.lastSync.toLocaleTimeString()}`:'Never synced';
+  return `<div class="integrations-panel">
+    <div class="integrations-title">🔗 Integrations</div>
+
+    <div class="integration-row">
+      <div class="integration-icon">📧</div>
+      <div class="integration-info">
+        <div class="integration-name">Gmail → Tasks</div>
+        <div class="integration-desc">Import actionable emails as tasks · ${fmtSync(gmSt)}</div>
+        <div class="integration-log show" id="int-log-gmail">${gmSt.log.map(l=>`<div>${esc(l)}</div>`).join('')}</div>
+      </div>
+      <span class="integration-status ${gmSt.status}" id="int-status-gmail">${gmSt.status==='idle'?'Ready':gmSt.status==='ok'?'Synced':gmSt.status==='loading'?'Syncing…':'Error'}</span>
+      <button class="btn-sync-integration" id="int-btn-gmail" ${gmSt.status==='loading'?'disabled':''}>Sync</button>
+    </div>
+
+    <div class="integration-row">
+      <div class="integration-icon">📅</div>
+      <div class="integration-info">
+        <div class="integration-name">Google Calendar → Meetings</div>
+        <div class="integration-desc">${GCAL_EMAIL} · ${fmtSync(gcSt)}</div>
+        <div class="integration-log show" id="int-log-gcal">${gcSt.log.map(l=>`<div>${esc(l)}</div>`).join('')}</div>
+      </div>
+      <span class="integration-status ${gcSt.status}" id="int-status-gcal">${gcSt.status==='idle'?'Ready':gcSt.status==='ok'?'Synced':gcSt.status==='loading'?'Syncing…':'Error'}</span>
+      <button class="btn-sync-integration" id="int-btn-gcal" ${gcSt.status==='loading'?'disabled':''}>Sync</button>
+    </div>
+  </div>`;
+}
+
+function bindIntegrationPanel(ca){
+  document.getElementById('int-btn-gmail')?.addEventListener('click',()=>syncGmail());
+  document.getElementById('int-btn-gcal')?.addEventListener('click',()=>syncGCal());
+}
+
+/* Auto-sync on load */
+window.addEventListener('load',()=>{
+  setTimeout(()=>{syncGCal();},3000);
+  setTimeout(()=>{syncGmail();},5000);
+});
+
 function renderDashboard(ca){
   SECS=getSECS();
   const today=todayStr(),tomorrow=tomorrowStr();
@@ -1264,6 +1495,9 @@ function renderDashboard(ca){
   }
 
   ca.innerHTML=h;
+  // inject integrations panel at top
+  ca.insertAdjacentHTML('afterbegin', buildIntegrationsPanel());
+  bindIntegrationPanel(ca);
   ca.querySelectorAll('.acc-header').forEach(hdr=>{
     hdr.addEventListener('click',()=>{
       const id=hdr.closest('.acc-wrap').dataset.acc;
@@ -1358,6 +1592,7 @@ function buildSection(sec){
   if(S.inlineOpen===sec){
     const dp=ist.pri||'medium';
     const dd=ist.date||todayStr();
+    const dr=ist.recur||'';
     h+=`<div class="inline-input-wrap">
       <input id="ii_${sec}" class="inline-text-input" placeholder="Task name… (Enter to save, Esc to cancel)" value="${esc(ist.text||'')}" />
       <div class="inline-controls">
@@ -1365,6 +1600,11 @@ function buildSection(sec){
         <button class="pri-box medium${dp==='medium'?' sel':''}" data-pri="medium" data-sec="${sec}">Medium</button>
         <button class="pri-box high${dp==='high'?' sel':''}" data-pri="high" data-sec="${sec}">High</button>
         <button class="inline-date-btn${dd?' has-date':''}" id="idb_${sec}">${dd?fmtDate(dd):'Pick date'}</button>
+        <select id="irec_${sec}" class="inline-select" style="background:var(--surface);border:1.5px solid var(--border2);border-radius:8px;padding:5px 8px;font-family:inherit;font-size:12px;color:var(--text2);outline:none;">
+          <option value="">No repeat</option>
+          <option value="weekly"${dr==='weekly'?' selected':''}>↻ Weekly</option>
+          <option value="monthly"${dr==='monthly'?' selected':''}>↻ Monthly</option>
+        </select>
         <button id="isave_${sec}" class="inline-save">Add</button>
         <button id="icancel_${sec}" class="inline-cancel">×</button>
       </div>
@@ -1486,7 +1726,8 @@ function bindTodoEvents(ca,secs){
       const text=inp.value.trim();
       if(text){
         const st=S.inlineState[sec]||{};
-        S.todos.push({id:uid(),text,section:sec,priority:st.pri||'medium',due:st.date||null,done:false,note:'',link:'',label:'',recur:'',subtasks:[],created:new Date().toISOString()});
+        const recurVal=document.getElementById('irec_'+sec)?.value||'';
+        S.todos.push({id:uid(),text,section:sec,priority:st.pri||'medium',due:st.date||null,done:false,note:'',link:'',label:'',recur:recurVal,subtasks:[],created:new Date().toISOString()});
         save();
       }
       S.inlineOpen=null;delete S.inlineState[sec];render();
@@ -1877,13 +2118,20 @@ function renderCalendar(ca){
         </div>
         <select id="qmSec" class="qm-input">${(S.workspaces||DEFAULT_WS).map(ws=>`<option value="${ws.id}">${esc(ws.label)}</option>`).join('')}</select>
       </div>
-      <div class="qm-row"><input id="qmNotes" class="qm-input" placeholder="Notes (optional)" /></div>
+      <div class="qm-row">
+        <input id="qmNotes" class="qm-input" placeholder="Notes (optional)" style="flex:2;" />
+        <select id="qmRecur" class="qm-input" style="flex:1;min-width:120px;">
+          <option value="">No repeat</option>
+          <option value="weekly">↻ Weekly</option>
+          <option value="monthly">↻ Monthly</option>
+        </select>
+      </div>
       <div class="qm-actions"><button class="btn-cancel-qm" id="qmCancel">Cancel</button><button class="btn-save-mtg" id="qmSave">Save meeting</button></div>
     </div>`;
   }
   mp+=`<div class="meetings-panel-title">${ptitle}<span class="count-badge">${disp.length}</span>${S.calSelected?`<button class="filter-btn" id="clearSel" style="padding:2px 8px;font-size:11px">Clear</button>`:''}</div>`;
   if(!disp.length&&!S.quickMeeting) mp+=`<div class="empty-state" style="padding:24px 0">Double-click any day to add a meeting</div>`;
-  disp.forEach(m=>{const info=SECS[m.section];mp+=`<div class="meeting-item"><div class="meeting-time">${m.time||'--:--'}</div><div class="meeting-body"><div class="meeting-title">${esc(m.title)}</div><div class="meeting-sub"><span>${fmtDate(m.date)}</span>${m.notes?`<span>· ${esc(m.notes)}</span>`:''}<span class="tag ${info.tag}" style="padding:1px 6px;font-size:10px">${info.label}</span></div></div><button class="meeting-del" data-id="${m.id}">×</button></div>`;});
+  disp.forEach(m=>{const info=SECS[m.section]||{tag:'tag-pro',label:'?'};mp+=`<div class="meeting-item"><div class="meeting-time">${m.time||'--:--'}</div><div class="meeting-body"><div class="meeting-title">${esc(m.title)}</div><div class="meeting-sub"><span>${fmtDate(m.date)}</span>${m.notes?`<span>· ${esc(m.notes)}</span>`:''}<span class="tag ${info.tag}" style="padding:1px 6px;font-size:10px">${info.label}</span>${m.recur?`<span style="font-size:10px;color:var(--text3)">↻ ${cap(m.recur)}</span>`:''}</div></div><button class="meeting-del" data-id="${m.id}">×</button></div>`;});
   mp+=`</div>`;
 
   ca.innerHTML=`<div class="cal-layout">${grid}${mp}</div>`;
@@ -1902,7 +2150,24 @@ function renderCalendar(ca){
     const title=document.getElementById('qmTitle').value.trim(),date=document.getElementById('qmDate').value;
     if(!title||!date){document.getElementById('qmTitle').focus();return;}
     const h=document.getElementById('qmHour').value,m=document.getElementById('qmMin').value;
-    S.meetings.push({id:uid(),title,date,time:(h&&m)?`${h}:${m}`:'',section:document.getElementById('qmSec').value,notes:document.getElementById('qmNotes').value.trim()});
+    const time=(h&&m)?`${h}:${m}`:'';
+    const section=document.getElementById('qmSec').value;
+    const notes=document.getElementById('qmNotes').value.trim();
+    const recur=document.getElementById('qmRecur').value;
+
+    // base meeting
+    S.meetings.push({id:uid(),title,date,time,section,notes,recur});
+
+    // spawn future occurrences (next 12 instances)
+    if(recur==='weekly'||recur==='monthly'){
+      let next=date;
+      for(let i=0;i<11;i++){
+        next=recur==='weekly'?addDays(next,7):addMonths(next,1);
+        S.meetings.push({id:uid(),title,date:next,time,section,notes,recur});
+      }
+      toast(`↻ Created 12 ${recur} occurrences`);
+    }
+
     S.quickMeeting=null;save();render();
   });
   document.getElementById('qmTitle')?.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('qmSave').click();if(e.key==='Escape'){S.quickMeeting=null;render();}});
