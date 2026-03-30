@@ -468,8 +468,20 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .btn-sync-integration{padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;flex-shrink:0;}
 .btn-sync-integration:hover{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);}
 .btn-sync-integration:disabled{opacity:.5;cursor:not-allowed;}
-.integration-log{margin-top:6px;font-size:12px;color:var(--text3);line-height:1.5;max-height:80px;overflow-y:auto;background:var(--surface2);border-radius:6px;padding:6px 10px;display:none;}
+.integration-log{margin-top:6px;font-size:12px;color:var(--text3);line-height:1.5;max-height:60px;overflow-y:auto;background:var(--surface2);border-radius:6px;padding:6px 10px;display:none;}
 .integration-log.show{display:block;}
+
+/* EMAIL INFO ITEMS */
+.email-infos{margin-top:12px;border-top:1px solid var(--border);padding-top:12px;}
+.email-infos-title{font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;display:flex;align-items:center;gap:6px;}
+.email-info-item{background:var(--surface2);border-radius:8px;padding:8px 12px;margin-bottom:6px;display:flex;align-items:flex-start;gap:10px;border-left:3px solid var(--accent);}
+.email-info-item:last-child{margin-bottom:0;}
+.email-info-from{font-size:11px;font-weight:600;color:var(--accent);flex-shrink:0;min-width:80px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.email-info-body{flex:1;min-width:0;}
+.email-info-subject{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.email-info-summary{font-size:12px;color:var(--text2);margin-top:1px;line-height:1.3;}
+.email-info-dismiss{background:none;border:none;color:var(--text3);font-size:14px;cursor:pointer;flex-shrink:0;padding:0 2px;line-height:1;}
+.email-info-dismiss:hover{color:var(--danger);}
 
 @media print{
   .header,.nav,.filter-bar,.inline-add,.btn-sync,.btn-icon,.ctx-menu,.integrations-panel{display:none!important;}
@@ -1228,7 +1240,7 @@ function dashTodoRow(t){
    INTEGRATIONS — Gmail + Google Calendar
 ══════════════════════════════════════ */
 const INTEGRATION_STATE={
-  gmail:{status:'idle',lastSync:null,log:[]},
+  gmail:{status:'idle',lastSync:null,log:[],infos:[]},
   gcal:{status:'idle',lastSync:null,log:[]},
 };
 const GCAL_EMAIL='adzian.mcc@gmail.com';
@@ -1256,43 +1268,24 @@ function updateIntegrationUI(key){
 async function syncGmail(){
   INTEGRATION_STATE.gmail.status='loading';
   updateIntegrationUI('gmail');
-  integrationLog('gmail','Asking Claude to check Gmail for actionable emails…');
+  integrationLog('gmail','Claude is reading and assessing your emails…');
   updateIntegrationUI('gmail');
 
   try{
-    const workspaceList=(S.workspaces||[]).map(w=>w.label).join(', ');
     const existingTasks=S.todos.filter(t=>t.source==='gmail').map(t=>t.text);
-
-    const response=await fetch('https://api.anthropic.com/v1/messages',{
+    const r=await fetch('/api/gmail',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:2000,
-        mcp_servers:[{type:'url',url:'https://gmail.mcp.claude.com/mcp',name:'gmail'}],
-        messages:[{role:'user',content:`Search Gmail for emails received in the last 48 hours that require action or a reply. For each actionable email, create a task.
-
-Available workspaces: ${workspaceList}
-Already imported tasks (skip these): ${existingTasks.slice(0,20).join(' | ')||'none'}
-
-Reply ONLY with a JSON array. Each object must have:
-- "text": short task description (max 60 chars), starting with action verb
-- "section": best matching workspace id from: ${(S.workspaces||[]).map(w=>'"'+w.id+'"').join(', ')}
-- "priority": "high" | "medium" | "low"
-- "due": date string YYYY-MM-DD or null
-- "note": email subject or sender info (max 80 chars)
-- "emailId": message id if available
-
-Return [] if no actionable emails found. Return ONLY valid JSON, no markdown.`}]
-      })
+      body:JSON.stringify({workspaces:S.workspaces||[],existingTasks})
     });
+    if(!r.ok){const e=await r.json();throw new Error(e.error||r.status);}
+    const {tasks=[],infos=[]}=await r.json();
 
-    const data=await response.json();
-    const raw=data.content?.find(c=>c.type==='text')?.text||'[]';
-    const tasks=JSON.parse(raw.replace(/```json|```/g,'').trim());
+    // store infos for dashboard display
+    INTEGRATION_STATE.gmail.infos=infos;
 
-    if(!Array.isArray(tasks)||tasks.length===0){
-      integrationLog('gmail','No new actionable emails found.');
+    if(!tasks.length&&!infos.length){
+      integrationLog('gmail','No actionable emails or updates found.');
       INTEGRATION_STATE.gmail.status='ok';
       INTEGRATION_STATE.gmail.lastSync=new Date();
       updateIntegrationUI('gmail');
@@ -1301,29 +1294,27 @@ Return [] if no actionable emails found. Return ONLY valid JSON, no markdown.`}]
 
     let added=0;
     tasks.forEach(task=>{
-      if(!task.text) return;
-      // dedup
-      if(S.todos.find(t=>t.text===task.text)) return;
+      if(!task.text)return;
+      if(S.todos.find(t=>t.text===task.text))return;
       S.todos.push({
-        id:uid(), text:task.text,
+        id:uid(),text:task.text,
         section:task.section||(S.workspaces[0]?.id||'perso'),
         priority:task.priority||'medium',
-        due:task.due||null,
-        note:task.note||'',
-        link:'', label:'', recur:'', subtasks:[],
-        source:'gmail',
-        done:false, created:new Date().toISOString()
+        due:task.due||null,note:task.note||'',
+        link:'',label:'',recur:'',subtasks:[],
+        source:'gmail',done:false,created:new Date().toISOString()
       });
       added++;
     });
 
     save();
-    integrationLog('gmail',`✓ Added ${added} task${added!==1?'s':''} from Gmail.`);
+    const msg=`✓ ${added} task${added!==1?'s':''} created, ${infos.length} info item${infos.length!==1?'s':''} from Gmail.`;
+    integrationLog('gmail',msg);
     INTEGRATION_STATE.gmail.status='ok';
     INTEGRATION_STATE.gmail.lastSync=new Date();
     updateIntegrationUI('gmail');
-    if(added>0){toast(`📧 ${added} task${added!==1?'s':''} imported from Gmail`);render();}
-
+    toast(`📧 ${msg}`);
+    render();
   }catch(err){
     integrationLog('gmail',`Error: ${err.message}`);
     INTEGRATION_STATE.gmail.status='err';
@@ -1341,36 +1332,15 @@ async function syncGCal(){
   try{
     const today=todayStr();
     const in30=addDays(today,30);
-    const workspaceList=(S.workspaces||[]).map(w=>w.label+':'+w.id).join(', ');
-
-    const response=await fetch('https://api.anthropic.com/v1/messages',{
+    const r=await fetch('/api/gcal',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:3000,
-        mcp_servers:[{type:'url',url:'https://gcal.mcp.claude.com/mcp',name:'gcal'}],
-        messages:[{role:'user',content:`List all calendar events for the email ${GCAL_EMAIL} from ${today} to ${in30}. 
-
-Available workspaces: ${workspaceList}
-
-Reply ONLY with a JSON array. Each object must have:
-- "title": event title
-- "date": YYYY-MM-DD
-- "time": HH:MM (24h) or "" if all-day
-- "section": best matching workspace id from workspaces above, default to first workspace if unsure
-- "notes": location or description (max 80 chars) or ""
-- "gcalId": event id
-
-Return [] if no events. Return ONLY valid JSON, no markdown.`}]
-      })
+      body:JSON.stringify({workspaces:S.workspaces||[],email:GCAL_EMAIL,dateFrom:today,dateTo:in30})
     });
+    if(!r.ok){const e=await r.json();throw new Error(e.error||r.status);}
+    const {events=[]}=await r.json();
 
-    const data=await response.json();
-    const raw=data.content?.find(c=>c.type==='text')?.text||'[]';
-    const events=JSON.parse(raw.replace(/```json|```/g,'').trim());
-
-    if(!Array.isArray(events)||events.length===0){
+    if(!events.length){
       integrationLog('gcal','No upcoming events found.');
       INTEGRATION_STATE.gcal.status='ok';
       INTEGRATION_STATE.gcal.lastSync=new Date();
@@ -1380,16 +1350,14 @@ Return [] if no events. Return ONLY valid JSON, no markdown.`}]
 
     let added=0,updated=0;
     events.forEach(ev=>{
-      if(!ev.title||!ev.date) return;
+      if(!ev.title||!ev.date)return;
       const existing=S.meetings.find(m=>m.gcalId&&m.gcalId===ev.gcalId);
       if(existing){
-        // update
         existing.title=ev.title;existing.date=ev.date;existing.time=ev.time||'';
         existing.notes=ev.notes||'';existing.section=ev.section||existing.section;
         updated++;
-      } else {
-        // check duplicate by title+date
-        if(S.meetings.find(m=>m.title===ev.title&&m.date===ev.date)) return;
+      }else{
+        if(S.meetings.find(m=>m.title===ev.title&&m.date===ev.date))return;
         S.meetings.push({
           id:uid(),title:ev.title,date:ev.date,
           time:ev.time||'',section:ev.section||(S.workspaces[0]?.id||'perso'),
@@ -1405,7 +1373,6 @@ Return [] if no events. Return ONLY valid JSON, no markdown.`}]
     INTEGRATION_STATE.gcal.lastSync=new Date();
     updateIntegrationUI('gcal');
     if(added+updated>0){toast(`📅 ${added} events synced from Google Calendar`);render();}
-
   }catch(err){
     integrationLog('gcal',`Error: ${err.message}`);
     INTEGRATION_STATE.gcal.status='err';
@@ -1417,17 +1384,39 @@ function buildIntegrationsPanel(){
   const gmSt=INTEGRATION_STATE.gmail;
   const gcSt=INTEGRATION_STATE.gcal;
   const fmtSync=st=>st.lastSync?`Last sync: ${st.lastSync.toLocaleTimeString()}`:'Never synced';
+  const infos=gmSt.infos||[];
+
+  const statusLabel=st=>({idle:'Ready',ok:'Synced',loading:'Syncing…',err:'Error'}[st.status]||st.status);
+
+  // Build email info items section
+  let infoHtml='';
+  if(infos.length){
+    infoHtml=`<div class="email-infos">
+      <div class="email-infos-title">💡 FYI from Gmail <span class="count-badge">${infos.length}</span></div>
+      ${infos.map((inf,i)=>`
+      <div class="email-info-item" data-info-idx="${i}">
+        <div class="email-info-from">${esc(inf.from||'')}</div>
+        <div class="email-info-body">
+          <div class="email-info-subject">${esc(inf.subject||'')}</div>
+          <div class="email-info-summary">${esc(inf.summary||inf.text||'')}</div>
+        </div>
+        <button class="email-info-dismiss" data-info-idx="${i}" title="Dismiss">×</button>
+      </div>`).join('')}
+    </div>`;
+  }
+
   return `<div class="integrations-panel">
     <div class="integrations-title">🔗 Integrations</div>
 
     <div class="integration-row">
       <div class="integration-icon">📧</div>
       <div class="integration-info">
-        <div class="integration-name">Gmail → Tasks</div>
-        <div class="integration-desc">Import actionable emails as tasks · ${fmtSync(gmSt)}</div>
-        <div class="integration-log show" id="int-log-gmail">${gmSt.log.map(l=>`<div>${esc(l)}</div>`).join('')}</div>
+        <div class="integration-name">Gmail → Tasks & Info</div>
+        <div class="integration-desc">Claude reads emails, creates tasks or flags info · ${fmtSync(gmSt)}</div>
+        <div class="integration-log${gmSt.log.length?' show':''}" id="int-log-gmail">${gmSt.log.map(l=>`<div>${esc(l)}</div>`).join('')}</div>
+        ${infoHtml}
       </div>
-      <span class="integration-status ${gmSt.status}" id="int-status-gmail">${gmSt.status==='idle'?'Ready':gmSt.status==='ok'?'Synced':gmSt.status==='loading'?'Syncing…':'Error'}</span>
+      <span class="integration-status ${gmSt.status}" id="int-status-gmail">${statusLabel(gmSt)}</span>
       <button class="btn-sync-integration" id="int-btn-gmail" ${gmSt.status==='loading'?'disabled':''}>Sync</button>
     </div>
 
@@ -1436,9 +1425,9 @@ function buildIntegrationsPanel(){
       <div class="integration-info">
         <div class="integration-name">Google Calendar → Meetings</div>
         <div class="integration-desc">${GCAL_EMAIL} · ${fmtSync(gcSt)}</div>
-        <div class="integration-log show" id="int-log-gcal">${gcSt.log.map(l=>`<div>${esc(l)}</div>`).join('')}</div>
+        <div class="integration-log${gcSt.log.length?' show':''}" id="int-log-gcal">${gcSt.log.map(l=>`<div>${esc(l)}</div>`).join('')}</div>
       </div>
-      <span class="integration-status ${gcSt.status}" id="int-status-gcal">${gcSt.status==='idle'?'Ready':gcSt.status==='ok'?'Synced':gcSt.status==='loading'?'Syncing…':'Error'}</span>
+      <span class="integration-status ${gcSt.status}" id="int-status-gcal">${statusLabel(gcSt)}</span>
       <button class="btn-sync-integration" id="int-btn-gcal" ${gcSt.status==='loading'?'disabled':''}>Sync</button>
     </div>
   </div>`;
@@ -1447,12 +1436,25 @@ function buildIntegrationsPanel(){
 function bindIntegrationPanel(ca){
   document.getElementById('int-btn-gmail')?.addEventListener('click',()=>syncGmail());
   document.getElementById('int-btn-gcal')?.addEventListener('click',()=>syncGCal());
+  // dismiss info items
+  ca.querySelectorAll('.email-info-dismiss').forEach(btn=>{
+    btn.addEventListener('click',e=>{
+      e.stopPropagation();
+      const idx=parseInt(btn.dataset.infoIdx);
+      INTEGRATION_STATE.gmail.infos.splice(idx,1);
+      // re-render just the panel
+      const panel=ca.querySelector('.integrations-panel');
+      if(panel){
+        panel.outerHTML=buildIntegrationsPanel();
+        bindIntegrationPanel(ca);
+      }
+    });
+  });
 }
 
-/* Auto-sync on load */
+/* Auto-sync GCal only — Gmail is manual to avoid spamming tasks */
 window.addEventListener('load',()=>{
-  setTimeout(()=>{syncGCal();},3000);
-  setTimeout(()=>{syncGmail();},5000);
+  setTimeout(()=>syncGCal(),4000);
 });
 
 function renderDashboard(ca){
