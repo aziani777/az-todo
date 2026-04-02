@@ -1,3 +1,5 @@
+const TIMEZONE = 'Europe/Paris'; // UTC+1 winter, UTC+2 summer (same as Oslo/Brussels)
+
 async function getAccessToken() {
   const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -14,17 +16,48 @@ async function getAccessToken() {
   return d.access_token;
 }
 
+// Extract date in Paris timezone
 function toYMD(isoString) {
   if (!isoString) return null;
-  return isoString.slice(0, 10);
+  // All-day events already have YYYY-MM-DD format
+  if (isoString.length === 10) return isoString;
+  const d = new Date(isoString);
+  // Format in Paris timezone
+  const parts = new Intl.DateTimeFormat('fr-CA', {
+    timeZone: TIMEZONE,
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(d);
+  return parts; // returns YYYY-MM-DD
 }
 
+// Extract HH:MM in Paris timezone
 function toHHMM(isoString) {
   if (!isoString || isoString.length === 10) return ''; // all-day
   const d = new Date(isoString);
-  const h = String(d.getHours()).padStart(2, '0');
-  const m = String(d.getMinutes()).padStart(2, '0');
+  const parts = new Intl.DateTimeFormat('fr-FR', {
+    timeZone: TIMEZONE,
+    hour: '2-digit', minute: '2-digit', hour12: false
+  }).formatToParts(d);
+  const h = parts.find(p => p.type === 'hour')?.value || '00';
+  const m = parts.find(p => p.type === 'minute')?.value || '00';
   return `${h}:${m}`;
+}
+
+// Strip HTML tags and decode common entities
+function stripHtml(str) {
+  if (!str) return '';
+  return str
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<li>/gi, '• ')
+    .replace(/<\/li>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function guessSection(summary, workspaces) {
@@ -50,7 +83,6 @@ export default async function handler(req, res) {
   try {
     const accessToken = await getAccessToken();
 
-    // Fetch events from Google Calendar primary calendar
     const timeMin = new Date(dateFrom || new Date()).toISOString();
     const timeMax = new Date(dateTo || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)).toISOString();
 
@@ -59,6 +91,7 @@ export default async function handler(req, res) {
       new URLSearchParams({
         timeMin,
         timeMax,
+        timeZone: TIMEZONE,
         singleEvents: 'true',
         orderBy: 'startTime',
         maxResults: '50',
@@ -80,7 +113,10 @@ export default async function handler(req, res) {
         const start = ev.start?.dateTime || ev.start?.date || '';
         const date = toYMD(start);
         const time = toHHMM(start);
-        const notes = [ev.location, ev.description].filter(Boolean).join(' · ').slice(0, 80);
+        // Clean HTML from description, combine with location
+        const location = stripHtml(ev.location || '');
+        const description = stripHtml(ev.description || '');
+        const notes = [location, description].filter(Boolean).join(' · ').slice(0, 120);
         return {
           title: ev.summary || '(No title)',
           date,
