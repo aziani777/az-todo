@@ -502,7 +502,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     </div>
   </div>
   <header class="header">
-    <div class="logo">AZ <span>Todo</span></div>
+    <div class="logo" id="logoBtn" style="cursor:pointer;" title="Go to Dashboard">AZ <span>Todo</span></div>
     <div class="header-right">
       <button class="btn-sync" id="syncBtn"><span class="sync-dot"></span> Sync</button>
       <div class="tools-wrap">
@@ -823,6 +823,14 @@ document.getElementById('toolPomodoro').addEventListener('click',()=>{
   openPomodoro();
 });
 
+/* ══ LOGO → DASHBOARD ══ */
+document.getElementById('logoBtn').addEventListener('click',()=>{
+  S.tab='dashboard'; S.inlineOpen=null; S.quickMeeting=null;
+  document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
+  document.querySelector('[data-tab="dashboard"]')?.classList.add('active');
+  render();
+});
+
 /* ══ TABS ══ */
 function initTabs(){
   document.querySelectorAll('.nav-tab:not([data-ws])').forEach(t=>{
@@ -852,6 +860,7 @@ function fmtDate(s){if(!s)return'';const[y,m,d]=s.split('-');return `${parseInt(
 function addDays(s,n){const d=new Date(s+' 00:00');d.setDate(d.getDate()+n);return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
 function addMonths(s,n){const d=new Date(s+' 00:00');d.setMonth(d.getMonth()+n);return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
 function isOv(due,done){if(!due||done)return false;const t=new Date();t.setHours(0,0,0,0);return new Date(due+' 00:00')<t;}
+function stripHtml(s){if(!s)return'';return s.replace(/<br\s*\/?>/gi,' ').replace(/<li>/gi,'• ').replace(/<\/li>/gi,' ').replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim();}
 function getLabelColor(id){return COLOR_LABELS.find(c=>c.id===id)?.color||'';}
 
 /* ══ TOAST ══ */
@@ -1353,8 +1362,10 @@ async function syncGCal(){
   updateIntegrationUI('gcal');
 
   try{
+    // Always sync today → today+30 days
     const today=todayStr();
     const in30=addDays(today,30);
+
     const r=await fetch('/api/gcal',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -1363,39 +1374,56 @@ async function syncGCal(){
     if(!r.ok){const e=await r.json();throw new Error(e.error||r.status);}
     const {events=[]}=await r.json();
 
-    if(!events.length){
-      integrationLog('gcal','No upcoming events found.');
-      INTEGRATION_STATE.gcal.status='ok';
-      INTEGRATION_STATE.gcal.lastSync=new Date();
-      updateIntegrationUI('gcal');
-      render();return;
-    }
+    // Build set of gcalIds returned by Google
+    const returnedIds=new Set(events.map(ev=>ev.gcalId).filter(Boolean));
 
+    // ── DELETE meetings that were removed in Google Calendar ──
+    // Only delete gcal-sourced meetings within the sync window (today → +30 days)
+    const beforeCount=S.meetings.length;
+    S.meetings=S.meetings.filter(m=>{
+      if(!m.gcalId) return true;          // manually created — keep always
+      if(m.date<today||m.date>in30) return true; // outside sync window — keep
+      return returnedIds.has(m.gcalId);  // keep only if still in Google Calendar
+    });
+    const deleted=beforeCount-S.meetings.length;
+
+    // ── ADD / UPDATE returned events ──
     let added=0,updated=0;
     events.forEach(ev=>{
       if(!ev.title||!ev.date)return;
       const existing=S.meetings.find(m=>m.gcalId&&m.gcalId===ev.gcalId);
       if(existing){
-        existing.title=ev.title;existing.date=ev.date;existing.time=ev.time||'';
-        existing.notes=ev.notes||'';existing.section=ev.section||existing.section;
+        existing.title=ev.title;
+        existing.date=ev.date;
+        existing.time=ev.time||'';
+        existing.notes=ev.notes||'';
+        existing.section=ev.section||existing.section;
         updated++;
       }else{
-        if(S.meetings.find(m=>m.title===ev.title&&m.date===ev.date))return;
         S.meetings.push({
           id:uid(),title:ev.title,date:ev.date,
-          time:ev.time||'',section:ev.section||(S.workspaces[0]?.id||'perso'),
-          notes:ev.notes||'',gcalId:ev.gcalId||''
+          time:ev.time||'',
+          section:ev.section||(S.workspaces[0]?.id||'perso'),
+          notes:ev.notes||'',
+          gcalId:ev.gcalId||''
         });
         added++;
       }
     });
 
     save();
-    integrationLog('gcal',`✓ ${added} added, ${updated} updated from Google Calendar.`);
+    const parts=[];
+    if(added)   parts.push(`${added} ajouté${added>1?'s':''}`);
+    if(updated) parts.push(`${updated} mis à jour`);
+    if(deleted) parts.push(`${deleted} supprimé${deleted>1?'s':''}`);
+    const msg=parts.length?parts.join(', '):'Aucun changement';
+    integrationLog('gcal',`✓ ${msg} · Fenêtre: ${fmtDate(today)} → ${fmtDate(in30)}`);
     INTEGRATION_STATE.gcal.status='ok';
     INTEGRATION_STATE.gcal.lastSync=new Date();
     updateIntegrationUI('gcal');
-    if(added+updated>0){toast(`📅 ${added} events synced from Google Calendar`);render();}
+    toast(`📅 Google Calendar: ${msg}`);
+    render();
+
   }catch(err){
     integrationLog('gcal',`Error: ${err.message}`);
     INTEGRATION_STATE.gcal.status='err';
@@ -1505,7 +1533,7 @@ function renderDashboard(ca){
   // Today's meetings static
   h+=`<div class="dash-section"><div class="dash-section-title">📅 Today's meetings <span class="count-badge">${todayMtgs.length}</span></div>`;
   if(!todayMtgs.length)h+=`<div style="font-size:13px;color:var(--text3);padding:4px 0 12px">No meetings today</div>`;
-  todayMtgs.forEach(m=>{const i=SECS[m.section];h+=`<div class="dash-mtg-row"><div class="dash-mtg-time">${m.time||'--:--'}</div><div style="flex:1"><div style="font-size:14px;font-weight:600">${esc(m.title)}</div>${m.notes?`<div style="font-size:12px;color:var(--text3)">${esc(m.notes)}</div>`:''}</div><span class="tag ${i.tag}" style="font-size:11px">${i.label}</span></div>`;});
+  todayMtgs.forEach(m=>{const i=SECS[m.section]||{tag:'tag-pro',label:'?'};const cn=stripHtml(m.notes||'');h+=`<div class="dash-mtg-row"><div class="dash-mtg-time">${m.time||'--:--'}</div><div style="flex:1"><div style="font-size:14px;font-weight:600">${esc(m.title)}</div>${cn?`<div style="font-size:12px;color:var(--text3)">${esc(cn)}</div>`:''}</div><span class="tag ${i.tag}" style="font-size:11px">${i.label}</span></div>`;});
   h+=`</div>`;
 
   if(overdue.length) h+=accSection('overdue','⚠','Overdue','var(--danger)',overdue.length,overdue.map(dashTodoRow),true);
@@ -1603,6 +1631,7 @@ function buildSection(sec){
           ${t.due?`<span class="todo-date${ov?' ov':''}">${fmtDate(t.due)}${ov?' · overdue':''}</span>`:''}
           <span class="pri-badge pri-badge-${pri}">${cap(pri)}</span>
           ${t.recur?`<span class="recur-badge">↻ ${cap(t.recur)}</span>`:''}
+          ${t.source==='gmail'?`<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;">📧 Gmail</span>`:''}
           ${t.link?`<a class="todo-link" href="${esc(t.link)}" target="_blank" onclick="event.stopPropagation()">🔗</a>`:''}
           ${t.done?`<span style="font-size:11px;color:var(--success);font-weight:600;">✓ Done</span>`:''}
         </div>
@@ -2156,7 +2185,11 @@ function renderCalendar(ca){
   }
   mp+=`<div class="meetings-panel-title">${ptitle}<span class="count-badge">${disp.length}</span>${S.calSelected?`<button class="filter-btn" id="clearSel" style="padding:2px 8px;font-size:11px">Clear</button>`:''}</div>`;
   if(!disp.length&&!S.quickMeeting) mp+=`<div class="empty-state" style="padding:24px 0">Double-click any day to add a meeting</div>`;
-  disp.forEach(m=>{const info=SECS[m.section]||{tag:'tag-pro',label:'?'};mp+=`<div class="meeting-item"><div class="meeting-time">${m.time||'--:--'}</div><div class="meeting-body"><div class="meeting-title">${esc(m.title)}</div><div class="meeting-sub"><span>${fmtDate(m.date)}</span>${m.notes?`<span>· ${esc(m.notes)}</span>`:''}<span class="tag ${info.tag}" style="padding:1px 6px;font-size:10px">${info.label}</span>${m.recur?`<span style="font-size:10px;color:var(--text3)">↻ ${cap(m.recur)}</span>`:''}</div></div><button class="meeting-del" data-id="${m.id}">×</button></div>`;});
+  disp.forEach(m=>{
+    const info=SECS[m.section]||{tag:'tag-pro',label:'?'};
+    const cleanNotes=stripHtml(m.notes||'');
+    mp+=`<div class="meeting-item"><div class="meeting-time">${m.time||'--:--'}</div><div class="meeting-body"><div class="meeting-title">${esc(m.title)}</div><div class="meeting-sub"><span>${fmtDate(m.date)}</span>${cleanNotes?`<span>· ${esc(cleanNotes)}</span>`:''}<span class="tag ${info.tag}" style="padding:1px 6px;font-size:10px">${info.label}</span>${m.recur?`<span style="font-size:10px;color:var(--text3)">↻ ${cap(m.recur)}</span>`:''}</div></div><button class="meeting-del" data-id="${m.id}">×</button></div>`;
+  });
   mp+=`</div>`;
 
   ca.innerHTML=`<div class="cal-layout">${grid}${mp}</div>`;
