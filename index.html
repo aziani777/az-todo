@@ -841,17 +841,19 @@ function hideAuthOverlay(){
   document.getElementById('authOverlay').style.display = 'none';
 
   // ── Per-user state isolation ──
-  // If a different user logged in on this device, wipe localStorage to start blank
+  // Non-main users always get a clean slate; only adzian.mcc uses the shared localStorage
   const storedUser = localStorage.getItem('aztodo_active_user');
   const isMainUser = currentUser === MAIN_USER || currentUser === 'local';
-  if(!isMainUser && storedUser && storedUser !== currentUser){
-    // Different user: clear their old data
-    localStorage.removeItem('aztodo_v5');
-    // Re-init state to empty
+  if(!isMainUser){
+    if(storedUser !== currentUser){
+      // Different (or first) non-main user on this device → wipe state
+      localStorage.removeItem('aztodo_v5');
+    }
+    // Always reset S to blank for non-main users so adzian's data never bleeds in
     S.todos=[]; S.meetings=[]; S.filter='all';
     S.workspaces=JSON.parse(JSON.stringify(DEFAULT_WS));
   }
-  // Always record who is logged in
+  // Record who is logged in
   if(currentUser && currentUser !== 'local'){
     localStorage.setItem('aztodo_active_user', currentUser);
   }
