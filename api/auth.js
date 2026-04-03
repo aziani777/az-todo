@@ -82,7 +82,7 @@ export default async function handler(req, res) {
         const users = await getUsers();
         if (!users[googleEmail]) {
           users[googleEmail] = { email: googleEmail, provider: 'google', created: new Date().toISOString() };
-          await saveUsers(users);
+          saveUsers(users).catch(()=>{}); // fire-and-forget
         }
       }
       const t = createToken(googleEmail);
@@ -101,7 +101,7 @@ export default async function handler(req, res) {
     const users = await getUsers();
     if (users[emailLower]) return res.status(409).json({ error: 'Account already exists' });
     users[emailLower] = { email: emailLower, password: hashed, created: new Date().toISOString() };
-    await saveUsers(users);
+    saveUsers(users).catch(()=>{}); // fire-and-forget — token is self-contained
     const t = createToken(emailLower);
     return res.status(200).json({ ok: true, token: t, email: emailLower });
   }
