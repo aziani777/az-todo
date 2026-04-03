@@ -153,8 +153,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .lv-ws-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex-shrink:0;}
 
 /* KANBAN CARDS (workspace kanban view) */
-.kanban-columns{display:flex;gap:14px;overflow-x:auto;padding-bottom:12px;align-items:start;scrollbar-width:thin;}
-.kanban-col{flex:0 0 220px;min-width:220px;display:flex;flex-direction:column;gap:0;}
+.kanban-columns{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:start;}
+@media(max-width:900px){.kanban-columns{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:560px){.kanban-columns{grid-template-columns:1fr;}}
+.kanban-col{display:flex;flex-direction:column;gap:0;min-width:0;}
 .kanban-col-head{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text3);padding:6px 4px;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
 .kanban-col-head .count-badge{font-size:10px;}
 .kanban-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 12px;margin-bottom:8px;cursor:pointer;box-shadow:var(--shadow);transition:box-shadow .15s,transform .1s;position:relative;}
@@ -868,7 +870,7 @@ function load(){
       if(!t.recur)t.recur='';
       if(!t.note)t.note='';
       if(!t.link)t.link='';
-      // migrate section ids: if section no longer exists, keep as-is
+      if(!t.kanbanCol) t.kanbanCol=t.done?'done':'todo'; // migrate: all existing tasks → À faire
     });
   }catch(e){}
 }
@@ -1996,26 +1998,34 @@ function bindListViewEvents(ca){
 
 /* ── KANBAN VIEW (workspace) ── */
 const KANBAN_COLS=[
-  {id:'todo',    label:'To Do',     labelFr:'À faire',   filter:t=>!t.done&&(!t.priority||t.priority==='low')},
-  {id:'medium',  label:'In Progress',labelFr:'En cours',  filter:t=>!t.done&&t.priority==='medium'},
-  {id:'high',    label:'Urgent',    labelFr:'Urgent',    filter:t=>!t.done&&t.priority==='high'},
-  {id:'done',    label:'Done',      labelFr:'Terminé',   filter:t=>t.done},
+  {id:'todo',       label:'To Do',      labelFr:'À faire'},
+  {id:'inprogress', label:'In Progress', labelFr:'En cours'},
+  {id:'urgent',     label:'Urgent',     labelFr:'Urgent'},
+  {id:'done',       label:'Done',       labelFr:'Terminé'},
 ];
+
+// Migrate: if a task has no kanbanCol, default to 'todo'
+function getKanbanCol(t){ return t.kanbanCol||'todo'; }
 
 function buildKanbanView(sec){
   const allTodos=S.todos.filter(t=>t.section===sec);
-  const info=SECS[sec]||{color:'var(--accent)'};
+
+  // Column accent colors
+  const colColors={todo:'var(--text3)',inprogress:'var(--accent)',urgent:'var(--danger)',done:'var(--success)'};
 
   let h=`<div class="kanban-columns">`;
   KANBAN_COLS.forEach(col=>{
     const colLabel=S.lang==='fr'?col.labelFr:col.label;
-    let items=allTodos.filter(col.filter);
+    const items=allTodos.filter(t=>getKanbanCol(t)===col.id);
     const count=items.length;
+    const accentColor=colColors[col.id]||'var(--text3)';
+
     h+=`<div class="kanban-col" data-kcol="${col.id}">
-      <div class="kanban-col-head">
-        <span>${colLabel}</span>
+      <div class="kanban-col-head" style="border-bottom:2px solid ${accentColor};padding-bottom:8px;">
+        <span style="color:${accentColor}">${colLabel}</span>
         <span class="count-badge">${count}</span>
       </div>`;
+
     items.forEach(t=>{
       const ov=isOv(t.due,t.done);
       const lc=getLabelColor(t.label);
@@ -2024,6 +2034,7 @@ function buildKanbanView(sec){
         ${lc?`<div style="width:100%;height:3px;border-radius:2px;background:${lc};margin-bottom:7px;"></div>`:''}
         <div class="kanban-card-title">${esc(t.text)}</div>
         <div class="kanban-card-meta">
+          <span class="pri-badge pri-badge-${pri}" style="font-size:9px;">${cap(pri)}</span>
           ${t.due?`<span class="todo-date${ov?' ov':''}" style="font-size:10px;">${fmtDate(t.due)}</span>`:''}
           ${t.source==='gmail'?`<span style="font-size:9px;font-weight:700;padding:0 4px;border-radius:3px;background:#fef2f2;color:#dc2626;border:1px solid #fca5a5;">Gmail</span>`:''}
           ${t.recur?`<span class="recur-badge" style="font-size:9px;">↻</span>`:''}
@@ -2031,9 +2042,9 @@ function buildKanbanView(sec){
         </div>
       </div>`;
     });
-    // Add card button (only for non-done cols)
+
     if(col.id!=='done'){
-      h+=`<div class="kanban-add-col" data-kadd="${col.id}" data-sec="${sec}">+ Add card</div>`;
+      h+=`<div class="kanban-add-col" data-kadd="${col.id}" data-sec="${sec}">+ ${S.lang==='fr'?'Ajouter':'Add card'}</div>`;
     }
     h+=`</div>`;
   });
@@ -2041,20 +2052,12 @@ function buildKanbanView(sec){
   return h;
 }
 
-function kanbanColToPriority(colId){
-  if(colId==='high') return 'high';
-  if(colId==='medium') return 'medium';
-  return 'low';
-}
-
 function bindKanbanEvents(ca,sec){
-  // click to edit
   ca.querySelectorAll('.kanban-card[data-id]').forEach(card=>{
     card.addEventListener('click',()=>openEditModal(card.dataset.id));
     card.addEventListener('contextmenu',e=>{e.preventDefault();showCtx({clientX:e.clientX,clientY:e.clientY},card.dataset.id);});
   });
 
-  // drag between kanban cols to change priority/done
   let dragKanbanId=null;
   ca.querySelectorAll('.kanban-card[data-id]').forEach(card=>{
     card.addEventListener('dragstart',e=>{
@@ -2062,31 +2065,34 @@ function bindKanbanEvents(ca,sec){
       e.dataTransfer.effectAllowed='move';
       setTimeout(()=>card.style.opacity='.35',0);
     });
-    card.addEventListener('dragend',()=>{card.style.opacity='';dragKanbanId=null;ca.querySelectorAll('.kanban-col').forEach(c=>c.style.outline='');});
+    card.addEventListener('dragend',()=>{
+      card.style.opacity='';
+      dragKanbanId=null;
+      ca.querySelectorAll('.kanban-col').forEach(c=>{c.style.outline='';c.style.background='';});
+    });
   });
+
   ca.querySelectorAll('.kanban-col').forEach(col=>{
-    col.addEventListener('dragover',e=>{e.preventDefault();col.style.outline='2px dashed var(--accent)';col.style.borderRadius='12px';});
-    col.addEventListener('dragleave',()=>{col.style.outline='';});
+    col.addEventListener('dragover',e=>{e.preventDefault();col.style.outline='2px dashed var(--accent)';col.style.borderRadius='12px';col.style.background='var(--accent-soft)';});
+    col.addEventListener('dragleave',()=>{col.style.outline='';col.style.background='';});
     col.addEventListener('drop',e=>{
-      e.preventDefault(); col.style.outline='';
+      e.preventDefault();
+      col.style.outline=''; col.style.background='';
       if(!dragKanbanId) return;
       const targetCol=col.dataset.kcol;
       const todo=S.todos.find(t=>t.id===dragKanbanId);
       if(!todo) return;
-      if(targetCol==='done'){ todo.done=true; }
-      else { todo.done=false; todo.priority=kanbanColToPriority(targetCol); }
+      todo.kanbanCol=targetCol;
+      todo.done=(targetCol==='done');
       save(); render();
     });
   });
 
-  // quick add card
   ca.querySelectorAll('.kanban-add-col[data-kadd]').forEach(btn=>{
     btn.addEventListener('click',()=>{
-      const pri=kanbanColToPriority(btn.dataset.kadd);
       S.inlineOpen=sec;
-      if(!S.inlineState[sec]) S.inlineState[sec]={pri,date:todayStr(),text:''};
-      S.inlineState[sec].pri=pri;
-      // Switch to list view to use inline add
+      if(!S.inlineState[sec]) S.inlineState[sec]={pri:'medium',date:todayStr(),text:'',kanbanCol:btn.dataset.kadd};
+      else S.inlineState[sec].kanbanCol=btn.dataset.kadd;
       S.viewWs='list'; render();
       setTimeout(()=>{const i=document.getElementById('ii_'+sec);if(i)i.focus();},50);
     });
@@ -2297,7 +2303,7 @@ function bindTodoEvents(ca,secs){
       if(text){
         const st=S.inlineState[sec]||{};
         const recurVal=document.getElementById('irec_'+sec)?.value||'';
-        S.todos.push({id:uid(),text,section:sec,priority:st.pri||'medium',due:st.date||null,done:false,note:'',link:'',label:'',recur:recurVal,subtasks:[],created:new Date().toISOString()});
+        S.todos.push({id:uid(),text,section:sec,priority:st.pri||'medium',due:st.date||null,done:false,note:'',link:'',label:'',recur:recurVal,subtasks:[],kanbanCol:st.kanbanCol||'todo',created:new Date().toISOString()});
         save();
       }
       S.inlineOpen=null;delete S.inlineState[sec];render();
@@ -2334,7 +2340,15 @@ function bindTodoEvents(ca,secs){
   });
 }
 
-function toggleDone(id){const t=S.todos.find(x=>x.id===id);if(t){t.done=!t.done;save();render();}}
+function toggleDone(id){
+  const t=S.todos.find(x=>x.id===id);
+  if(t){
+    t.done=!t.done;
+    if(t.done) t.kanbanCol='done';
+    else if(t.kanbanCol==='done') t.kanbanCol='todo';
+    save();render();
+  }
+}
 
 /* ══════════════════════════════════════
    WEEKLY VIEW
