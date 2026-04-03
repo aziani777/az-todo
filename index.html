@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Nowera</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -537,6 +538,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div id="authTitle" style="font-size:22px;font-weight:700;text-align:center;margin-bottom:6px;">Welcome back</div>
     <div id="authSubtitle" style="font-size:14px;color:var(--text3);text-align:center;margin-bottom:24px;">Sign in to your account</div>
     <div id="authError" style="display:none;background:var(--danger-soft);color:var(--danger);border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px;"></div>
+
+    <!-- Google Sign-In -->
+    <div id="googleBtnWrap" style="display:flex;justify-content:center;margin-bottom:16px;">
+      <div id="googleSignInBtn"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+      <div style="flex:1;height:1px;background:var(--border2);"></div>
+      <span style="font-size:12px;color:var(--text3);white-space:nowrap;">or continue with email</span>
+      <div style="flex:1;height:1px;background:var(--border2);"></div>
+    </div>
+
     <div style="display:flex;flex-direction:column;gap:12px;">
       <input id="authEmail" type="email" class="form-input" placeholder="Email address" style="font-size:15px;" autocomplete="email" />
       <input id="authPassword" type="password" class="form-input" placeholder="Password" style="font-size:15px;" autocomplete="current-password" />
@@ -746,7 +758,45 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
 <script>
 /* ══ AUTH ══ */
+const GOOGLE_CLIENT_ID = '98209531140-vj1e6o7qnvplb3kcmdvtdijier6h8v6h.apps.googleusercontent.com';
 let currentUser = null;
+
+/* Google Sign-In callback */
+async function handleGoogleSignIn(response){
+  const errEl = document.getElementById('authError');
+  errEl.style.display = 'none';
+  try{
+    const r = await fetch('/api/auth', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action:'google', credential: response.credential})
+    });
+    const d = await r.json();
+    if(d.ok){
+      localStorage.setItem('aztodo_token', d.token);
+      currentUser = d.email;
+      hideAuthOverlay();
+    } else {
+      errEl.textContent = d.error || 'Google sign-in failed.';
+      errEl.style.display = 'block';
+    }
+  }catch(e){
+    errEl.textContent = 'Connection error. Please try again.';
+    errEl.style.display = 'block';
+  }
+}
+
+function renderGoogleBtn(){
+  if(typeof google === 'undefined') return;
+  google.accounts.id.initialize({
+    client_id: GOOGLE_CLIENT_ID,
+    callback: handleGoogleSignIn,
+    auto_select: false,
+  });
+  google.accounts.id.renderButton(
+    document.getElementById('googleSignInBtn'),
+    { theme:'outline', size:'large', width:320, text:'signin_with', shape:'rectangular' }
+  );
+}
 
 async function authCheck(){
   const token = localStorage.getItem('aztodo_token');
@@ -770,6 +820,9 @@ function showAuthOverlay(mode){
   overlay.style.display = 'flex';
   document.getElementById('authError').style.display = 'none';
   setAuthMode(mode);
+  // Render Google button (GSI may not have loaded yet — retry)
+  if(typeof google !== 'undefined') renderGoogleBtn();
+  else { const t=setInterval(()=>{if(typeof google!=='undefined'){renderGoogleBtn();clearInterval(t);}},300); }
 }
 
 function hideAuthOverlay(){
